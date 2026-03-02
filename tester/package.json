@@ -16,7 +16,7 @@
   "dependencies": {
     "@babel/preset-typescript": "^7.27.1",
     "@gorhom/portal": "^1.0.14",
-    "react-native-harmony": "0.82.7",
+    "react-native-harmony": "npm:@react-native-ohos/react-native-harmony@0.82.7",
     "@rnoh/testerino": "file:./rnoh_package/testerino/rnoh-testerino-0.0.12.tgz",
     "memfs": "4.17.2",
     "react": "19.1.1",
@@ -31,7 +31,7 @@
     "@react-native-community/cli": "20.0.0",
     "@react-native-community/cli-platform-android": "20.0.0",
     "@react-native-community/cli-platform-ios": "20.0.0",
-    "@rnoh/react-native-harmony-cli": "0.82.7",
+    "@rnoh/react-native-harmony-cli": "npm:@react-native-ohos/react-native-harmony-cli@0.82.7",
     "@react-native/babel-preset": "0.82.1",
     "@react-native/eslint-config": "0.82.1",
     "@react-native/metro-config": "0.82.1",

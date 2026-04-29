@@ -16,16 +16,98 @@
 #include "PingTool.h"
 #include <deviceinfo.h>
 #include <dlfcn.h>
+#include <cstdio>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <sys/time.h>
 
 #define LOG_DOMAIN 0xFF00
 #define LOG_TAG "NativePing"
 #define NUM_QueryProbeAPI 20
 
+#define PING_TIMEOUT_MS 3000
+
+static char* PingWithSocket(char address[], int32_t duration)
+{
+    struct sockaddr_in dest_addr;
+    memset(&dest_addr, 0, sizeof(dest_addr));
+    dest_addr.sin_family = AF_INET;
+    if (inet_pton(AF_INET, address, &dest_addr.sin_addr) <= 0) {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_DOMAIN, LOG_TAG,
+                     "Invalid IP address: %{public}s", address);
+        return nullptr;
+    }
+    uint32_t total_delay = 0;
+    int success_count = 0;
+    uint32_t min_delay = UINT32_MAX;
+    uint32_t max_delay = 0;
+    int ping_count = duration > 0 ? duration : 1;
+    for (int i = 0; i < ping_count; i++) {
+        int sock = socket(AF_INET, SOCK_STREAM, 0);
+        if (sock < 0) {
+            OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_DOMAIN, LOG_TAG,
+                         "Socket creation failed");
+            continue;
+        }
+        struct timeval timeout;
+        timeout.tv_sec = PING_TIMEOUT_MS / 1000;
+        timeout.tv_usec = (PING_TIMEOUT_MS % 1000) * 1000;
+        setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+        struct timeval start_time, end_time;
+        gettimeofday(&start_time, nullptr);
+        dest_addr.sin_port = htons(80);
+        int connect_result = connect(sock, (struct sockaddr*)&dest_addr, sizeof(dest_addr));
+        gettimeofday(&end_time, nullptr);
+        uint32_t delay = (end_time.tv_sec - start_time.tv_sec) * 1000 +
+                        (end_time.tv_usec - start_time.tv_usec) / 1000;
+        if (connect_result == 0) {
+            total_delay += delay;
+            success_count++;
+            if (delay < min_delay) min_delay = delay;
+            if (delay > max_delay) max_delay = delay;
+        }
+        close(sock);
+        if (i < ping_count - 1) {
+            usleep(1000000);
+        }
+    }
+    if (success_count == 0) {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_DOMAIN, LOG_TAG,
+                     "All ping attempts failed");
+        return nullptr;
+    }
+    uint32_t avg_delay = total_delay / success_count;
+    uint8_t loss_rate = ((ping_count - success_count) * 100) / ping_count;
+    uint32_t std_delay = (max_delay > min_delay) ? (max_delay - min_delay) / 2 : 0;
+    try {
+        std::ostringstream oss;
+        oss << "{\"lossRate\": " << static_cast<int>(loss_rate)
+            << ", \"minDelay\": " << min_delay
+            << ", \"maxDelay\": " << max_delay
+            << ", \"avgDelay\": " << avg_delay
+            << ", \"stdDelay\": " << std_delay << "}";
+        std::string str = oss.str();
+        char* json = new char[str.size() + 1];
+        str.copy(json, str.size(), 0);
+        json[str.size()] = '\0';
+        return json;
+    } catch (const std::bad_alloc& e) {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_DOMAIN, LOG_TAG,
+                     "build json result error: %{public}s", e.what());
+        return nullptr;
+    }
+}
+
 char* PingTool::Ping(char address[], int32_t duration)
 {
     if (OH_GetSdkApiVersion() < NUM_QueryProbeAPI) {
-        OH_LOG_ERROR(LOG_APP, "SDK API version is too low, expected: %{public}d, actual: %{public}d", NUM_QueryProbeAPI, OH_GetSdkApiVersion());
-        return nullptr;
+        OH_LOG_Print(LOG_APP, LOG_INFO, LOG_DOMAIN, LOG_TAG,
+                     "SDK API version is too low (%{public}d < %{public}d), using socket-based ping fallback",
+                     OH_GetSdkApiVersion(), NUM_QueryProbeAPI);
+        return PingWithSocket(address, duration);
     }
     
     void *funcHandle = dlopen("libnet_connection.so", RTLD_LAZY);
